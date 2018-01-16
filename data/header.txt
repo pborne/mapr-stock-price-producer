@@ -1,0 +1,1 @@
+#Fields:,date,time,time-taken,c-ip,cs-username,cs-auth-group,x-exception-id,sc-filter-result,cs-categories,cs(Referer),sc-status,s-action,cs-method,rs(Content-Type),cs-uri-scheme,cs-host,cs-uri-port,cs-uri-path,cs-uri-query,cs-uri-extension,cs(User-Agent),s-ip,sc-bytes,cs-bytes,x-virus-id
