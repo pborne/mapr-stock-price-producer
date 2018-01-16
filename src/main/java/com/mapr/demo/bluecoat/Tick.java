@@ -1,4 +1,4 @@
-package com.mapr.demo.stock_ticker;
+package com.mapr.demo.bluecoat;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Charsets;

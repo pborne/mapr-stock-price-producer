@@ -1,8 +1,6 @@
-package com.mapr.demo.stock_ticker;
+package com.mapr.demo.bluecoat;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
+import java.io.*;
 import java.lang.Exception;
 import java.lang.Thread;
 
@@ -11,93 +9,107 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
-import java.io.IOException;
-import java.util.LinkedList;
+import java.nio.charset.Charset;
+import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Properties;
-import java.util.concurrent.atomic.AtomicLong;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.zip.GZIPInputStream;
+
+import sun.nio.cs.US_ASCII;
+
+import javax.xml.bind.DatatypeConverter;
 
 public class Producer {
 
-    private static final Logger LOG = LoggerFactory.getLogger(Producer.class);
-
     private static KafkaProducer producer;
-    private static final LinkedList<File> DATAFILES = new LinkedList<>();
-    private static final AtomicLong PROCESSED = new AtomicLong();
+    private static final ArrayList<File> allFiles = new ArrayList<>();
+    private static long messagesProcessed;
     private final String topic;
     private static String stats;
-    private final File taqFile;
     private int current, last = 0;
 
     public Producer(final String topic, final File f) {
-        this.taqFile = f;
         this.topic = topic;
         this.stats = topic + "_stats";
         configureProducer();
-        if (taqFile.isDirectory()) {
-            for (final File fileEntry : taqFile.listFiles()) {
+        if (f.isDirectory()) {
+            for (final File fileEntry : f.listFiles()) {
                 if (fileEntry.isDirectory()) {
                     System.err.println("WARNING: skipping files in directory " + fileEntry.getName());
                 } else {
-                    DATAFILES.add(fileEntry);
+                    allFiles.add(fileEntry);
                 }
             }
         } else {
-            DATAFILES.add(taqFile);
+            allFiles.add(f);
         }
     }
 
     public void produce() throws IOException {
-        System.out.println("Publishing data from " + DATAFILES.size() + " files.");
         long startTime = System.nanoTime();
         long last_update = 0;
 
-        for (final File f : DATAFILES) {
-            FileReader fr = new FileReader(f);
-            BufferedReader reader = new BufferedReader(fr);
+        BufferedReader reader;
+        Charset cs = new US_ASCII();
+
+        for (final File f : allFiles) {
+
+            System.out.println("Publishing data from " + f.getAbsolutePath());
+
+            // Check if the file is gzipped or not
+            if (f.getName().toUpperCase().endsWith(".GZ")) {
+                InputStream fileStream = new FileInputStream(f);
+                InputStream gzipStream = new GZIPInputStream(fileStream);
+                Reader decoder = new InputStreamReader(gzipStream, cs);
+                reader = new BufferedReader(decoder);
+            } else {
+                FileReader fr = new FileReader(f);
+                reader = new BufferedReader(fr);
+            }
+
             String line = reader.readLine();
-            int interval = 0;
 
             try {
+                long lineNumber = 1;
                 while (line != null) {
                     long current_time = System.nanoTime();
-		    String key = line.substring(0, 16);
-                    ProducerRecord<String, byte[]> record = new ProducerRecord<>(topic, key, line.getBytes(Charsets.ISO_8859_1));
 
-                    producer.send(record, (RecordMetadata metadata, Exception e) -> {
-                        PROCESSED.incrementAndGet();
-                    });
+                    // Build a unique key for the line to be published
+                    byte[] hash = MessageDigest.getInstance("MD5").digest(line.getBytes(Charsets.US_ASCII));
+                    String key = DatatypeConverter.printHexBinary(hash) + lineNumber;
 
-                    current = Integer.parseInt(line.substring(6, 9));
-                    if ((current - last) < 0)
-                        interval = (current + 1000) - last;
-                    else
-                        interval = current - last;
-                    Thread.sleep(interval);
-                    last = current;
+                    ProducerRecord<String, byte[]> record = new ProducerRecord<>(topic, key, line.getBytes(Charsets.US_ASCII));
+
+                    producer.send(record, (RecordMetadata metadata, Exception e) -> messagesProcessed++);
+
                     // Print performance stats once per second
                     if ((Math.floor(current_time - startTime) / 1e9) > last_update) {
                         last_update++;
                         producer.flush();
-                        printStatus(PROCESSED.get(), 1, startTime);
+                        printStatus(messagesProcessed, 1, startTime);
                     }
+
                     line = reader.readLine();
+                    lineNumber++;
                 }
 
             } catch (Exception e) {
                 System.err.println("ERROR: " + e);
-                System.err.println("Line :'"+line+"'");
+                System.err.println("Line :'" + line + "'");
                 e.printStackTrace();
             }
         }
+
         producer.flush();
+
         try {
             Thread.sleep(2000);
         } catch (InterruptedException e) {
         }
-        System.out.println("Published " + PROCESSED + " messages to stream.");
+
+        System.out.println("Published " + messagesProcessed + " messages to stream.");
         System.out.println("Finished.");
+
         producer.close();
     }
 
@@ -116,23 +128,19 @@ public class Producer {
         long elapsedTime = System.nanoTime() - startTime;
         double rp = records_processed / ((double) elapsedTime / 1000000000.0) / 1000;
         System.out.printf("Throughput = %.2f Kmsgs/sec published. Threads = %d. Total published = %d.\n",
-                          rp,
-                          poolSize,
-                          records_processed);
-        ProducerRecord<String, byte[]> stats_event = new ProducerRecord<>(stats, Long.toString(elapsedTime / 1000), 
-            new Double(rp).toString().getBytes(Charsets.ISO_8859_1));
-                    producer.send(stats_event);
+                rp,
+                poolSize,
+                records_processed);
+        ProducerRecord<String, byte[]> stats_event = new ProducerRecord<>(stats, Long.toString(elapsedTime / 1000),
+                new Double(rp).toString().getBytes(Charsets.US_ASCII));
+        producer.send(stats_event);
     }
 
-    public static void main(String[] args) throws IOException, Exception {
+    public static void main(String[] args) throws Exception {
         if (args.length != 2) {
-            throw new Exception("Usage: java -cp target/stock-ticker-1.0.jar stream:topic [file name | directory]");
+            throw new Exception("Usage: java -cp bluecoat.jar com.mapr.demo.bluecoat.Producer stream:topic [file_name | directory]");
         }
         Producer p = new Producer(args[0], new File(args[1]));
-        try {
-            p.produce();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        p.produce();
     }
 }

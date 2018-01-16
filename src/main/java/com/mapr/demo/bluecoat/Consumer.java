@@ -1,42 +1,43 @@
 /* Copyright (c) 2009 & onwards. MapR Tech, Inc., All rights reserved */
-package com.mapr.demo.stock_ticker;
+package com.mapr.demo.bluecoat;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 
-public class ConsumerForTest {
+public class Consumer {
 
     // Declare a new consumer.
     public static KafkaConsumer consumer;
 
-    public static void main(String[] args) throws IOException {
-        configureConsumer(args);
+    public static void main(String[] args) throws Exception {
+        configureConsumer();
 
-        String topic = "/user/user01/pump:sensor";
+        String topic;
         if (args.length == 1) {
             topic = args[0];
+        } else {
+            throw new Exception("Usage: java -cp bluecoat.jar com.mapr.demo.bluecoat.Consumer stream:topic");
         }
 
-        List<String> topics = new ArrayList<String>();
+        List<String> topics = new ArrayList<>();
         topics.add(topic);
         // Subscribe to the topic.
         consumer.subscribe(topics);
 
         // Set the timeout interval for requests for unread messages.
-        long pollTimeOut = 60000;     // one minute
+        long pollTimeOut = 60 * 1000;     // one minute
         long numberOfMsgsReceived = 0;
         while (true) {
             // Request unread messages from the topic.
             ConsumerRecords<String, String> msg = consumer.poll(pollTimeOut);
             if (msg.count() == 0) {
-                System.out.println("No messages after 60 second wait.");
+                System.out.println("No messages after 60 second wait. Exiting.");
                 break;
             } else {
                 System.out.println("Read " + msg.count() + " messages");
@@ -44,30 +45,27 @@ public class ConsumerForTest {
 
                 // Iterate through returned records, extract the value
                 // of each message, and print the value to standard output.
-                Iterator<ConsumerRecord<String, String>> iter = msg.iterator();
-                while (iter.hasNext()) {
-                    ConsumerRecord<String, String> record = iter.next();
+                Iterator<ConsumerRecord<String, String>> iterator = msg.iterator();
+                while (iterator.hasNext()) {
+                    ConsumerRecord<String, String> record = iterator.next();
                     System.out.println("Consuming " + record.toString());
-
                 }
             }
         }
+
         consumer.close();
         System.out.println("Total number of messages received: " + numberOfMsgsReceived);
         System.out.println("All done.");
-
     }
 
     /* Set the value for configuration parameters.*/
-    public static void configureConsumer(String[] args) {
+    public static void configureConsumer() {
         Properties props = new Properties();
         // cause consumers to start at beginning of topic on first read
         props.put("auto.offset.reset", "earliest");
-        props.put("key.deserializer",
-                "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
         //  which class to use to deserialize the value of each message
-        props.put("value.deserializer",
-                "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
 
         consumer = new KafkaConsumer<String, String>(props);
     }
